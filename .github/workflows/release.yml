@@ -1,0 +1,70 @@
+name: Release packages
+
+permissions:
+  contents: write
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            generator: DEB;RPM
+            pattern: |
+              _build/*.deb
+              _build/*.rpm
+            install_cmd: sudo apt-get update && sudo apt-get install -y rpm
+          - os: macos-latest
+            generator: DragNDrop
+            pattern: _build/*.dmg
+            install_cmd: ''
+          - os: windows-latest
+            generator: WIX
+            pattern: _build/*.msi
+            install_cmd: choco install wixtoolset -y
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install dependencies
+        if: matrix.install_cmd != ''
+        run: ${{ matrix.install_cmd }}
+
+      - name: Configure CMake
+        run: cmake -B _build -DCPACK_GENERATOR="${{ matrix.generator }}"
+
+      - name: Build
+        run: cmake --build _build --config Release
+
+      - name: Package
+        working-directory: _build
+        run: cpack -G "${{ matrix.generator }}" -C Release
+
+      - name: Upload artifacts (temporary)
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.os }}
+          path: ${{ matrix.pattern }}
+
+  release:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release and upload assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
